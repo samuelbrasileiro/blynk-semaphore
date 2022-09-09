@@ -1,26 +1,24 @@
+#define BLYNK_TEMPLATE_ID "TMPL6DaD9Zyv"
+#define BLYNK_DEVICE_NAME "Meu Semaforo"
+#define BLYNK_AUTH_TOKEN "k2UTxHMwEIXGCRYDcgKqlmkdnP_5lMY5"
 #include <Blynk.h>
-#include <WiFi.h>
 #include "soc/soc.h"
 #include "soc/rtc_cntl_reg.h"
 
-#define LDR 13
+#define LDR 33
 #define RED 23
 #define GREEN 18
 #define YELLOW 19
-#define BUZZER 19
+#define BUZZER 17
 
 #define A 22
 #define B 21
 #define C 32
-#define D 33
+#define D 16
 #define E 25
 #define FLED 26
 #define G 27
 
-#define BLYNK_TEMPLATE_ID "TMPL6DaD9Zyv"
-#define BLYNK_DEVICE_NAME "Meu Semaforo"
-#define BLYNK_AUTH_TOKEN "k2UTxHMwEIXGCRYDcgKqlmkdnP_5lMY5"
-#define BLYNK_FIRMWARE_VERSION "0.1.0"
 #define BLYNK_PRINT Serial
 #include "BlynkSimpleEsp32.h"
 
@@ -46,13 +44,16 @@ char pass[] = "acessocin";
 
 BlynkTimer timer;
 
-int redTimer = 10;
-int yellowTimer = 10;
-int greenTimer = 10;
+int redTimer = 5;
+int yellowTimer = 5;
+int greenTimer = 5;
 
 int previous_ldr = 0;
 int state = 0;
 int count = 0;
+int redCount = 0;
+
+int buzzerFrequency = 0;
 
 void writeDisplay(int number) {
   bool* display = sete_segmentos[number];
@@ -63,15 +64,17 @@ void writeDisplay(int number) {
   digitalWrite(E, display[4]);
   digitalWrite(FLED, display[5]);
   digitalWrite(G, display[6]);
-}  
+}
 
 void updateSystem() {
-  writeDisplay((count > 9) ? 9 : count); 
+  
   switch(state) {
   case RED_STATE:
+    writeDisplay(redTimer - ((count > 9) ? 9 : count)); 
     digitalWrite(RED, 1);
     digitalWrite(YELLOW, 0);
     digitalWrite(GREEN, 0);
+    ledcWrite(0, buzzerFrequency);
     if(count < redTimer){
       count++;
     } else {
@@ -80,9 +83,11 @@ void updateSystem() {
     }
     break;
   case YELLOW_STATE:
+    writeDisplay(yellowTimer - ((count > 9) ? 9 : count)); 
     digitalWrite(RED, 0);
     digitalWrite(YELLOW, 1);
     digitalWrite(GREEN, 0);
+    ledcWrite(0, 0);
     if(count < yellowTimer){
       count++;
     } else {
@@ -91,9 +96,11 @@ void updateSystem() {
     }
     break;
   case GREEN_STATE:
+    writeDisplay(greenTimer - ((count > 9) ? 9 : count)); 
     digitalWrite(RED, 0);
     digitalWrite(YELLOW, 0);
     digitalWrite(GREEN, 1);
+    ledcWrite(0, 0);
     if(count < greenTimer){
       count++;
     } else {
@@ -106,6 +113,19 @@ void updateSystem() {
   }
 }
 
+BLYNK_WRITE(V0){
+  redTimer = param.asInt();
+}
+BLYNK_WRITE(V1){
+  yellowTimer = param.asInt();
+}
+BLYNK_WRITE(V2){
+  greenTimer = param.asInt();
+}
+BLYNK_WRITE(V4){
+  buzzerFrequency = param.asInt();
+}
+
 void setup() {
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
   pinMode(LDR, INPUT); //LDR
@@ -113,9 +133,11 @@ void setup() {
   pinMode(RED, OUTPUT); //vermelho
   pinMode(YELLOW, OUTPUT); //amarelo
   pinMode(GREEN, OUTPUT); //verde
-  pinMode(BUZZER, OUTPUT); //buzzer
-  
+  pinMode(BUZZER, OUTPUT);
+  ledcAttachPin(BUZZER, 0);
+  ledcSetup(0, 1000, 10);
   Serial.begin(115200);
+  Serial.println("Começou");
   pinMode(A, OUTPUT);
   pinMode(B, OUTPUT);
   pinMode(C, OUTPUT);
@@ -127,18 +149,12 @@ void setup() {
   delay(100);
   Blynk.begin(auth,ssid,pass);
   timer.setInterval(1000L, updateSystem);
-  
-  BLYNK_WRITE(V0) {
-    redTimer = param.asInt();
-  }
-  BLYNK_WRITE(V1) {
-    yellowTimer = param.asInt();
-  }
-  BLYNK_WRITE(V2) {
-    greenTimer = param.asInt();
-  }
-}
-  
+  timer.setInterval(1000L, checkLDR);
+  Serial.println("Finalizou setup");
+  Blynk.virtualWrite(V0, redTimer);
+  Blynk.virtualWrite(V1, yellowTimer);
+  Blynk.virtualWrite(V2, greenTimer);
+  Blynk.virtualWrite(V3, redCount);
 }
 
 void loop() {
@@ -146,14 +162,13 @@ void loop() {
   timer.run();
 }
 
-void activateSensor() {
-  int ldr_read = digitalRead(LDR);
-  Serial.println(pir_read);
-  if (ldr_read - previous_ldr > 300) {
-    state = TRIGGERED_STATE;
+void checkLDR() {
+  int ldr_read = analogRead(LDR);
+  if(state == RED_STATE && ldr_read - previous_ldr > 300) {
+    redCount++;
+    Blynk.virtualWrite(V3, redCount);
   }
   previous_ldr = ldr_read;
-  delay(2000);  
 }
 
 void reset() {
@@ -164,5 +179,4 @@ void reset() {
   digitalWrite(E, 0);
   digitalWrite(FLED, 0);
   digitalWrite(G, 0);
-  state = INITIAL_STATE;
 }
